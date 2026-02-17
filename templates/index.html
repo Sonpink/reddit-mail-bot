@@ -4,49 +4,125 @@
 <title>Reddit Mail Worker Panel</title>
 
 <style>
+
 body {
-    font-family: Arial;
-    background: #f4f6f8;
+    font-family: Arial, sans-serif;
+    background: linear-gradient(135deg, #0f172a, #020617);
+    color: white;
     text-align: center;
-    margin-top: 50px;
+    margin-top: 40px;
 }
 
 .container {
-    background: white;
+    background: #0b1220;
     padding: 30px;
-    width: 400px;
+    width: 500px;
     margin: auto;
-    border-radius: 10px;
-    box-shadow: 0 0 10px rgba(0,0,0,0.2);
+    border-radius: 12px;
+    box-shadow: 0 0 20px rgba(0,0,0,0.5);
 }
 
-button {
-    padding: 10px 20px;
-    margin: 10px;
+h2 {
+    margin-bottom: 25px;
+}
+
+.account-box {
+
+    background: #020617;
+    border: 1px solid #1e293b;
+    padding: 15px;
+    margin: 10px 0;
+    border-radius: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.account-text {
+    color: #38bdf8;
     font-size: 16px;
+    word-break: break-all;
+}
+
+.copy-btn {
+
+    background: #1e293b;
+    border: none;
+    color: white;
+    padding: 6px 12px;
+    border-radius: 6px;
     cursor: pointer;
 }
 
+.copy-btn:hover {
+    background: #334155;
+}
+
+.main-btn {
+
+    background: linear-gradient(90deg, #0284c7, #06b6d4);
+    border: none;
+    color: white;
+    padding: 12px 20px;
+    margin: 10px;
+    font-size: 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    width: 80%;
+}
+
+.main-btn:hover {
+    opacity: 0.9;
+}
+
 .result {
+
     margin-top: 20px;
     text-align: left;
+    background: #020617;
+    padding: 15px;
+    border-radius: 8px;
 }
+
+hr {
+    border: 0.5px solid #1e293b;
+}
+
+.label {
+    text-align: left;
+    margin-top: 15px;
+    color: #94a3b8;
+    font-size: 14px;
+}
+
 </style>
 
 </head>
+
 <body>
 
 <div class="container">
 
 <h2>Reddit Mail Worker Panel</h2>
 
-<button onclick="getAccount()">Get New Mail</button>
+<button class="main-btn" onclick="getAccount()">Get New Mail</button>
 
-<div id="account"></div>
+<div class="label">EMAIL</div>
 
-<button onclick="checkMail()">Check Reddit Mail</button>
+<div class="account-box">
+    <div class="account-text" id="emailText">-</div>
+    <button class="copy-btn" onclick="copyText('emailText', this)">Copy</button>
+</div>
 
-<button onclick="getAccount()">Next Mail</button>
+<div class="label">PASSWORD</div>
+
+<div class="account-box">
+    <div class="account-text" id="passwordText">-</div>
+    <button class="copy-btn" onclick="copyText('passwordText', this)">Copy</button>
+</div>
+
+<button class="main-btn" onclick="checkMail()">Check Reddit Mail</button>
+<button class="main-btn" onclick="getAccount()">Next Mail</button>
 
 <div class="result" id="result"></div>
 
@@ -56,6 +132,7 @@ button {
 
 let current = null;
 
+
 function getAccount(){
 
 fetch("/get_account")
@@ -63,26 +140,30 @@ fetch("/get_account")
 .then(data => {
 
 if(data.status === "empty"){
+
 alert("No accounts available");
 return;
+
 }
 
 current = data;
 
-document.getElementById("account").innerHTML =
-"<b>Email:</b> " + data.email + "<br>" +
-"<b>Password:</b> " + data.password;
+document.getElementById("emailText").innerText = data.email;
+document.getElementById("passwordText").innerText = data.password;
 
 document.getElementById("result").innerHTML = "";
 
 });
 }
 
+
 function checkMail(){
 
 if(!current){
+
 alert("Get account first");
 return;
+
 }
 
 fetch("/check_mail", {
@@ -101,6 +182,7 @@ document.getElementById("result").innerHTML =
 "<b>No Reddit mails found</b>";
 
 return;
+
 }
 
 let html = "";
@@ -115,9 +197,28 @@ html += "<b>Subject:</b> " + mail.subject + "<hr>";
 document.getElementById("result").innerHTML = html;
 
 });
+
+}
+
+
+function copyText(id, btn){
+
+let text = document.getElementById(id).innerText;
+
+navigator.clipboard.writeText(text);
+
+btn.innerText = "Copied!";
+
+setTimeout(() => {
+
+btn.innerText = "Copy";
+
+}, 1500);
+
 }
 
 </script>
 
 </body>
+
 </html>
