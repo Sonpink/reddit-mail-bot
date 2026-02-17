@@ -11,13 +11,16 @@ from flask import Flask, render_template, request, jsonify, session, redirect
 app = Flask(__name__)
 app.secret_key = "secretkey123"
 
+# =====================================================
+# PERMANENT DATABASE CONFIGURATION (RENDER SAFE)
+# =====================================================
 
-# =========================
-# Configuration
-# =========================
+PERSISTENT_DIR = "/opt/render/project/src"
+DB_FILE = os.path.join(PERSISTENT_DIR, "accounts.db")
 
-BASE_DIR = "/opt/render/project/src"
-DB_FILE = os.path.join(BASE_DIR, "accounts.db")
+os.makedirs(PERSISTENT_DIR, exist_ok=True)
+
+print("Using database:", DB_FILE)
 
 LOCK = threading.Lock()
 
@@ -25,16 +28,14 @@ ADMIN_PASSWORD = "123456"
 
 REDDIT_SENDER = "noreply@redditmail.com"
 
-LEASE_TIMEOUT = 300
+LEASE_TIMEOUT = 300  # 5 minutes
 
 
-# =========================
-# Database Initialization
-# =========================
+# =====================================================
+# DATABASE INITIALIZATION (SAFE, NEVER RESETS)
+# =====================================================
 
 def init_db():
-
-    os.makedirs(BASE_DIR, exist_ok=True)
 
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     c = conn.cursor()
@@ -42,7 +43,7 @@ def init_db():
     c.execute("""
         CREATE TABLE IF NOT EXISTS accounts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            email TEXT,
+            email TEXT UNIQUE,
             password TEXT,
             refresh_token TEXT,
             client_id TEXT,
@@ -58,9 +59,9 @@ def init_db():
 init_db()
 
 
-# =========================
-# Reset expired accounts
-# =========================
+# =====================================================
+# RESET EXPIRED IN_USE ACCOUNTS
+# =====================================================
 
 def reset_expired_accounts():
 
@@ -82,9 +83,9 @@ def reset_expired_accounts():
     conn.close()
 
 
-# =========================
-# Stats
-# =========================
+# =====================================================
+# GET ADMIN STATS
+# =====================================================
 
 def get_stats():
 
@@ -111,9 +112,66 @@ def get_stats():
     }
 
 
-# =========================
-# Delete functions
-# =========================
+# =====================================================
+# ADD ACCOUNTS (SUPPORTS BOTH FORMATS)
+# =====================================================
+
+def add_accounts(text):
+
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    c = conn.cursor()
+
+    lines = text.strip().split("\n")
+
+    added = 0
+
+    for line in lines:
+
+        line = line.strip()
+
+        if not line:
+            continue
+
+        parts = line.split(":")
+
+        if len(parts) < 4:
+            continue
+
+        email = parts[0]
+        password = parts[1]
+
+        refresh_token = parts[-2]
+        client_id = parts[-1]
+
+        try:
+
+            c.execute("""
+                INSERT OR IGNORE INTO accounts
+                (email,password,refresh_token,client_id,status,assigned_at)
+                VALUES (?,?,?,?,?,NULL)
+            """, (
+                email,
+                password,
+                refresh_token,
+                client_id,
+                "AVAILABLE"
+            ))
+
+            if c.rowcount > 0:
+                added += 1
+
+        except:
+            pass
+
+    conn.commit()
+    conn.close()
+
+    return added
+
+
+# =====================================================
+# DELETE FUNCTIONS
+# =====================================================
 
 def delete_used_accounts():
 
@@ -137,9 +195,9 @@ def delete_all_accounts():
     conn.close()
 
 
-# =========================
-# Account handling
-# =========================
+# =====================================================
+# ACCOUNT ASSIGNMENT
+# =====================================================
 
 def get_account():
 
@@ -218,59 +276,9 @@ def mark_available(account_id):
     conn.close()
 
 
-def add_accounts(text):
-
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-    c = conn.cursor()
-
-    lines = text.strip().split("\n")
-
-    added = 0
-
-    for line in lines:
-
-        line = line.strip()
-
-        if not line:
-            continue
-
-        parts = line.split(":")
-
-        # Must have at least 4 parts
-        if len(parts) < 4:
-            continue
-
-        email = parts[0]
-        password = parts[1]
-
-        # Always take last 2 fields as refresh_token and client_id
-        refresh_token = parts[-2]
-        client_id = parts[-1]
-
-        c.execute("""
-            INSERT INTO accounts
-            (email,password,refresh_token,client_id,status,assigned_at)
-            VALUES (?,?,?,?,?,NULL)
-        """, (
-            email,
-            password,
-            refresh_token,
-            client_id,
-            "AVAILABLE"
-        ))
-
-        added += 1
-
-    conn.commit()
-    conn.close()
-
-    return added
-
-
-
-# =========================
-# OTP functions
-# =========================
+# =====================================================
+# OUTLOOK TOKEN + OTP
+# =====================================================
 
 def get_token(refresh_token, client_id):
 
@@ -324,7 +332,6 @@ def get_otp(email_addr, token):
                 match = re.search(r"\d{6}", subject)
 
                 if match:
-
                     imap.logout()
                     return match.group()
 
@@ -336,9 +343,9 @@ def get_otp(email_addr, token):
     return None
 
 
-# =========================
-# Routes
-# =========================
+# =====================================================
+# ROUTES
+# =====================================================
 
 @app.route("/")
 def index():
@@ -384,17 +391,12 @@ def route_skip():
     return jsonify({"ok": True})
 
 
-# =========================
-# Admin routes
-# =========================
-
 @app.route("/admin", methods=["GET", "POST"])
 def admin():
 
     if request.method == "POST":
 
         if request.form.get("password") == ADMIN_PASSWORD:
-
             session["admin"] = True
             return redirect("/admin")
 
