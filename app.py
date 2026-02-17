@@ -10,21 +10,30 @@ from flask import Flask, render_template, request, jsonify, session, redirect
 app = Flask(__name__)
 app.secret_key = "secretkey123"
 
-ADMIN_PASSWORD = "123456"
-DB_FILE = "accounts.db"
+
+# =========================
+# Render-safe SQLite path
+# =========================
+
+BASE_DIR = "/opt/render/project/src"
+DB_FILE = os.path.join(BASE_DIR, "accounts.db")
 
 LOCK = threading.Lock()
+
+ADMIN_PASSWORD = "123456"
 
 REDDIT_SENDER = "noreply@redditmail.com"
 
 
-# -------------------------
-# Database setup
-# -------------------------
+# =========================
+# Initialize database safely
+# =========================
 
 def init_db():
 
-    conn = sqlite3.connect(DB_FILE)
+    os.makedirs(BASE_DIR, exist_ok=True)
+
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     c = conn.cursor()
 
     c.execute("""
@@ -45,15 +54,15 @@ def init_db():
 init_db()
 
 
-# -------------------------
-# Get next account
-# -------------------------
+# =========================
+# Get next AVAILABLE account
+# =========================
 
 def get_account():
 
     with LOCK:
 
-        conn = sqlite3.connect(DB_FILE)
+        conn = sqlite3.connect(DB_FILE, check_same_thread=False)
         c = conn.cursor()
 
         c.execute("""
@@ -72,7 +81,8 @@ def get_account():
         account_id = row[0]
 
         c.execute("""
-            UPDATE accounts SET status='IN_USE'
+            UPDATE accounts
+            SET status='IN_USE'
             WHERE id=?
         """, (account_id,))
 
@@ -88,17 +98,18 @@ def get_account():
         }
 
 
-# -------------------------
-# Mark used
-# -------------------------
+# =========================
+# Mark account USED
+# =========================
 
 def mark_used(account_id):
 
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     c = conn.cursor()
 
     c.execute("""
-        UPDATE accounts SET status='USED'
+        UPDATE accounts
+        SET status='USED'
         WHERE id=?
     """, (account_id,))
 
@@ -106,17 +117,18 @@ def mark_used(account_id):
     conn.close()
 
 
-# -------------------------
-# Mark available again
-# -------------------------
+# =========================
+# Mark account AVAILABLE again
+# =========================
 
 def mark_available(account_id):
 
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     c = conn.cursor()
 
     c.execute("""
-        UPDATE accounts SET status='AVAILABLE'
+        UPDATE accounts
+        SET status='AVAILABLE'
         WHERE id=?
     """, (account_id,))
 
@@ -124,13 +136,13 @@ def mark_available(account_id):
     conn.close()
 
 
-# -------------------------
-# Add accounts
-# -------------------------
+# =========================
+# Add accounts from admin panel
+# =========================
 
 def add_accounts(text):
 
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     c = conn.cursor()
 
     lines = text.strip().split("\n")
@@ -146,53 +158,68 @@ def add_accounts(text):
             INSERT INTO accounts
             (email,password,refresh_token,client_id,status)
             VALUES (?,?,?,?,?)
-        """, (parts[0], parts[1], parts[2], parts[3], "AVAILABLE"))
+        """, (
+            parts[0],
+            parts[1],
+            parts[2],
+            parts[3],
+            "AVAILABLE"
+        ))
 
     conn.commit()
     conn.close()
 
 
-# -------------------------
-# Get access token
-# -------------------------
+# =========================
+# Get Outlook access token
+# =========================
 
-def get_token(refresh, client):
+def get_token(refresh_token, client_id):
 
-    r = requests.post(
-        "https://login.microsoftonline.com/common/oauth2/v2.0/token",
-        data={
-            "client_id": client,
-            "refresh_token": refresh,
-            "grant_type": "refresh_token",
-            "scope": "https://outlook.office.com/IMAP.AccessAsUser.All offline_access",
-        },
-    )
+    try:
 
-    if r.status_code != 200:
+        r = requests.post(
+            "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+            data={
+                "client_id": client_id,
+                "refresh_token": refresh_token,
+                "grant_type": "refresh_token",
+                "scope": "https://outlook.office.com/IMAP.AccessAsUser.All offline_access",
+            },
+            timeout=10
+        )
+
+        if r.status_code != 200:
+            return None
+
+        return r.json().get("access_token")
+
+    except:
         return None
 
-    return r.json().get("access_token")
 
-
-# -------------------------
-# Get newest OTP
-# -------------------------
+# =========================
+# Get newest Reddit OTP
+# =========================
 
 def get_otp(email_addr, token):
 
     try:
 
-        auth = f"user={email_addr}\1auth=Bearer {token}\1\1"
+        auth_string = f"user={email_addr}\1auth=Bearer {token}\1\1"
 
         imap = imaplib.IMAP4_SSL("outlook.office365.com")
-        imap.authenticate("XOAUTH2", lambda x: auth)
+        imap.authenticate("XOAUTH2", lambda x: auth_string)
         imap.select("INBOX")
 
         typ, data = imap.search(None, "ALL")
 
-        for num in reversed(data[0].split()):
+        ids = data[0].split()
+
+        for num in reversed(ids):
 
             typ, msg_data = imap.fetch(num, "(RFC822)")
+
             msg = email.message_from_bytes(msg_data[0][1])
 
             sender = msg.get("From", "")
@@ -204,20 +231,21 @@ def get_otp(email_addr, token):
                 match = re.search(r"\d{6}", subject)
 
                 if match:
+
                     imap.logout()
                     return match.group()
 
         imap.logout()
 
     except:
-        pass
+        return None
 
     return None
 
 
-# -------------------------
+# =========================
 # Routes
-# -------------------------
+# =========================
 
 @app.route("/")
 def index():
@@ -225,7 +253,7 @@ def index():
 
 
 @app.route("/get_account")
-def route_get():
+def route_get_account():
 
     acc = get_account()
 
@@ -236,7 +264,7 @@ def route_get():
 
 
 @app.route("/check_otp", methods=["POST"])
-def route_check():
+def route_check_otp():
 
     data = request.json
 
@@ -263,16 +291,16 @@ def route_skip():
     return jsonify({"ok": True})
 
 
-# -------------------------
+# =========================
 # Admin login
-# -------------------------
+# =========================
 
 @app.route("/admin", methods=["GET", "POST"])
 def admin():
 
     if request.method == "POST":
 
-        if request.form["password"] == ADMIN_PASSWORD:
+        if request.form.get("password") == ADMIN_PASSWORD:
 
             session["admin"] = True
             return redirect("/admin")
@@ -284,18 +312,26 @@ def admin():
 
 
 @app.route("/add_accounts", methods=["POST"])
-def route_add():
+def route_add_accounts():
 
     if not session.get("admin"):
         return "Unauthorized"
 
-    add_accounts(request.form["accounts"])
+    add_accounts(request.form.get("accounts", ""))
 
     return "Accounts added successfully"
 
 
-# -------------------------
+# =========================
+# Render port binding
+# =========================
 
 if __name__ == "__main__":
+
     port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+
+    app.run(
+        host="0.0.0.0",
+        port=port,
+        debug=False
+    )
