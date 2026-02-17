@@ -25,12 +25,11 @@ ADMIN_PASSWORD = "123456"
 
 REDDIT_SENDER = "noreply@redditmail.com"
 
-# timeout in seconds (5 minutes)
 LEASE_TIMEOUT = 300
 
 
 # =========================
-# Initialize database
+# Database Initialization
 # =========================
 
 def init_db():
@@ -60,7 +59,7 @@ init_db()
 
 
 # =========================
-# Reset expired IN_USE accounts
+# Reset expired accounts
 # =========================
 
 def reset_expired_accounts():
@@ -84,7 +83,7 @@ def reset_expired_accounts():
 
 
 # =========================
-# Get Stats
+# Stats
 # =========================
 
 def get_stats():
@@ -113,7 +112,33 @@ def get_stats():
 
 
 # =========================
-# Get account safely
+# Delete functions
+# =========================
+
+def delete_used_accounts():
+
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    c = conn.cursor()
+
+    c.execute("DELETE FROM accounts WHERE status='USED'")
+
+    conn.commit()
+    conn.close()
+
+
+def delete_all_accounts():
+
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    c = conn.cursor()
+
+    c.execute("DELETE FROM accounts")
+
+    conn.commit()
+    conn.close()
+
+
+# =========================
+# Account handling
 # =========================
 
 def get_account():
@@ -161,10 +186,6 @@ def get_account():
         }
 
 
-# =========================
-# Mark Used
-# =========================
-
 def mark_used(account_id):
 
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
@@ -181,10 +202,6 @@ def mark_used(account_id):
     conn.close()
 
 
-# =========================
-# Mark Available
-# =========================
-
 def mark_available(account_id):
 
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
@@ -200,10 +217,6 @@ def mark_available(account_id):
     conn.commit()
     conn.close()
 
-
-# =========================
-# Add Accounts
-# =========================
 
 def add_accounts(text):
 
@@ -242,7 +255,7 @@ def add_accounts(text):
 
 
 # =========================
-# Token
+# OTP functions
 # =========================
 
 def get_token(refresh_token, client_id):
@@ -268,10 +281,6 @@ def get_token(refresh_token, client_id):
     except:
         return None
 
-
-# =========================
-# OTP
-# =========================
 
 def get_otp(email_addr, token):
 
@@ -361,6 +370,10 @@ def route_skip():
     return jsonify({"ok": True})
 
 
+# =========================
+# Admin routes
+# =========================
+
 @app.route("/admin", methods=["GET", "POST"])
 def admin():
 
@@ -385,8 +398,28 @@ def route_add_accounts():
     if not session.get("admin"):
         return "Unauthorized"
 
-    added = add_accounts(request.form.get("accounts", ""))
+    add_accounts(request.form.get("accounts", ""))
 
-    stats = get_stats()
+    return redirect("/admin")
 
-    return render_template("admin.html", stats=stats, added=added)
+
+@app.route("/delete_used", methods=["POST"])
+def route_delete_used():
+
+    if not session.get("admin"):
+        return "Unauthorized"
+
+    delete_used_accounts()
+
+    return redirect("/admin")
+
+
+@app.route("/delete_all", methods=["POST"])
+def route_delete_all():
+
+    if not session.get("admin"):
+        return "Unauthorized"
+
+    delete_all_accounts()
+
+    return redirect("/admin")
