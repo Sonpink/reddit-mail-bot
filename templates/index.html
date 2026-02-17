@@ -26,6 +26,13 @@ h2 {
     margin-bottom: 25px;
 }
 
+.label {
+    text-align: left;
+    margin-top: 15px;
+    color: #94a3b8;
+    font-size: 14px;
+}
+
 .account-box {
 
     background: #020617;
@@ -78,18 +85,17 @@ h2 {
 .result {
 
     margin-top: 20px;
-    text-align: left;
+    text-align: center;
     background: #020617;
-    padding: 15px;
+    padding: 20px;
     border-radius: 8px;
+    font-size: 22px;
+    color: #22c55e;
+    font-weight: bold;
 }
 
-hr {
-    border: 0.5px solid #1e293b;
-}
+.status {
 
-.label {
-    text-align: left;
     margin-top: 15px;
     color: #94a3b8;
     font-size: 14px;
@@ -121,18 +127,24 @@ hr {
     <button class="copy-btn" onclick="copyText('passwordText', this)">Copy</button>
 </div>
 
-<button class="main-btn" onclick="checkMail()">Check Reddit Mail</button>
-<button class="main-btn" onclick="getAccount()">Next Mail</button>
+<button class="main-btn" onclick="nextMail()">Next Mail</button>
 
-<div class="result" id="result"></div>
+<div class="result" id="otpBox">
+Latest OTP: Waiting...
+</div>
+
+<div class="status" id="statusText"></div>
 
 </div>
+
 
 <script>
 
 let current = null;
+let checkingInterval = null;
 
 
+// Get new account
 function getAccount(){
 
 fetch("/get_account")
@@ -151,22 +163,33 @@ current = data;
 document.getElementById("emailText").innerText = data.email;
 document.getElementById("passwordText").innerText = data.password;
 
-document.getElementById("result").innerHTML = "";
+document.getElementById("otpBox").innerText = "Latest OTP: Waiting...";
+document.getElementById("statusText").innerText = "Checking inbox automatically...";
+
+startChecking();
 
 });
 }
 
 
-function checkMail(){
+// Start auto OTP checking
+function startChecking(){
 
-if(!current){
+if(checkingInterval){
+clearInterval(checkingInterval);
+}
 
-alert("Get account first");
-return;
+checkingInterval = setInterval(checkOTP, 5000);
 
 }
 
-fetch("/check_mail", {
+
+// Check OTP
+function checkOTP(){
+
+if(!current) return;
+
+fetch("/check_otp", {
 
 method: "POST",
 headers: {"Content-Type": "application/json"},
@@ -176,31 +199,63 @@ body: JSON.stringify(current)
 .then(res => res.json())
 .then(data => {
 
-if(data.mails.length === 0){
+if(data.otp){
 
-document.getElementById("result").innerHTML =
-"<b>No Reddit mails found</b>";
+document.getElementById("otpBox").innerText =
+"Latest OTP: " + data.otp;
 
+document.getElementById("statusText").innerText =
+"OTP received successfully";
+
+clearInterval(checkingInterval);
+
+}
+
+});
+
+}
+
+
+// Next mail with confirmation
+function nextMail(){
+
+if(!current){
+alert("Get account first");
 return;
-
 }
 
-let html = "";
+if(!confirm("Are you sure you want to skip this account?")){
+return;
+}
 
-data.mails.forEach(mail => {
+fetch("/skip", {
 
-html += "<b>From:</b> " + mail.from + "<br>";
-html += "<b>Subject:</b> " + mail.subject + "<hr>";
+method: "POST",
+headers: {"Content-Type": "application/json"},
+body: JSON.stringify(current)
+
+})
+.then(() => {
+
+current = null;
+
+document.getElementById("emailText").innerText = "-";
+document.getElementById("passwordText").innerText = "-";
+
+document.getElementById("otpBox").innerText =
+"Latest OTP: Waiting...";
+
+document.getElementById("statusText").innerText =
+"Account skipped. Click Get New Mail.";
+
+clearInterval(checkingInterval);
 
 });
 
-document.getElementById("result").innerHTML = html;
-
-});
-
 }
 
 
+// Copy function
 function copyText(id, btn){
 
 let text = document.getElementById(id).innerText;
@@ -220,5 +275,4 @@ btn.innerText = "Copy";
 </script>
 
 </body>
-
 </html>
