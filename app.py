@@ -12,7 +12,7 @@ app.secret_key = "secretkey123"
 
 
 # =========================
-# Render-safe SQLite path
+# Render-safe paths
 # =========================
 
 BASE_DIR = "/opt/render/project/src"
@@ -26,7 +26,7 @@ REDDIT_SENDER = "noreply@redditmail.com"
 
 
 # =========================
-# Initialize database safely
+# Database Initialization
 # =========================
 
 def init_db():
@@ -55,7 +55,34 @@ init_db()
 
 
 # =========================
-# Get next AVAILABLE account
+# Get Stats for Admin
+# =========================
+
+def get_stats():
+
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    c = conn.cursor()
+
+    c.execute("SELECT COUNT(*) FROM accounts WHERE status='AVAILABLE'")
+    available = c.fetchone()[0]
+
+    c.execute("SELECT COUNT(*) FROM accounts WHERE status='IN_USE'")
+    in_use = c.fetchone()[0]
+
+    c.execute("SELECT COUNT(*) FROM accounts WHERE status='USED'")
+    used = c.fetchone()[0]
+
+    conn.close()
+
+    return {
+        "available": available,
+        "in_use": in_use,
+        "used": used
+    }
+
+
+# =========================
+# Get next account
 # =========================
 
 def get_account():
@@ -99,7 +126,7 @@ def get_account():
 
 
 # =========================
-# Mark account USED
+# Mark Used
 # =========================
 
 def mark_used(account_id):
@@ -118,7 +145,7 @@ def mark_used(account_id):
 
 
 # =========================
-# Mark account AVAILABLE again
+# Mark Available Again
 # =========================
 
 def mark_available(account_id):
@@ -137,7 +164,7 @@ def mark_available(account_id):
 
 
 # =========================
-# Add accounts from admin panel
+# Add Accounts
 # =========================
 
 def add_accounts(text):
@@ -146,6 +173,8 @@ def add_accounts(text):
     c = conn.cursor()
 
     lines = text.strip().split("\n")
+
+    added = 0
 
     for line in lines:
 
@@ -166,12 +195,16 @@ def add_accounts(text):
             "AVAILABLE"
         ))
 
+        added += 1
+
     conn.commit()
     conn.close()
 
+    return added
+
 
 # =========================
-# Get Outlook access token
+# Get Access Token
 # =========================
 
 def get_token(refresh_token, client_id):
@@ -199,17 +232,17 @@ def get_token(refresh_token, client_id):
 
 
 # =========================
-# Get newest Reddit OTP
+# Get OTP
 # =========================
 
 def get_otp(email_addr, token):
 
     try:
 
-        auth_string = f"user={email_addr}\1auth=Bearer {token}\1\1"
+        auth = f"user={email_addr}\1auth=Bearer {token}\1\1"
 
         imap = imaplib.IMAP4_SSL("outlook.office365.com")
-        imap.authenticate("XOAUTH2", lambda x: auth_string)
+        imap.authenticate("XOAUTH2", lambda x: auth)
         imap.select("INBOX")
 
         typ, data = imap.search(None, "ALL")
@@ -219,7 +252,6 @@ def get_otp(email_addr, token):
         for num in reversed(ids):
 
             typ, msg_data = imap.fetch(num, "(RFC822)")
-
             msg = email.message_from_bytes(msg_data[0][1])
 
             sender = msg.get("From", "")
@@ -292,7 +324,7 @@ def route_skip():
 
 
 # =========================
-# Admin login
+# Admin Login + Dashboard
 # =========================
 
 @app.route("/admin", methods=["GET", "POST"])
@@ -308,7 +340,12 @@ def admin():
     if not session.get("admin"):
         return render_template("admin_login.html")
 
-    return render_template("admin.html")
+    stats = get_stats()
+
+    return render_template(
+        "admin.html",
+        stats=stats
+    )
 
 
 @app.route("/add_accounts", methods=["POST"])
@@ -317,21 +354,20 @@ def route_add_accounts():
     if not session.get("admin"):
         return "Unauthorized"
 
-    add_accounts(request.form.get("accounts", ""))
+    added = add_accounts(request.form.get("accounts", ""))
 
-    return "Accounts added successfully"
+    stats = get_stats()
+
+    return render_template(
+        "admin.html",
+        stats=stats,
+        added=added
+    )
 
 
 # =========================
-# Render port binding
+# Render Port Binding
 # =========================
 
 if __name__ == "__main__":
-
-    port = int(os.environ.get("PORT", 10000))
-
-    app.run(
-        host="0.0.0.0",
-        port=port,
-        debug=False
-    )
+    app.run(debug=True)
