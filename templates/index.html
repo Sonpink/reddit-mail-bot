@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Reddit Mail Worker Panel</title>
+
+<style>
+body {
+    font-family: Arial;
+    background: #f4f6f8;
+    text-align: center;
+    margin-top: 50px;
+}
+
+.container {
+    background: white;
+    padding: 30px;
+    width: 400px;
+    margin: auto;
+    border-radius: 10px;
+    box-shadow: 0 0 10px rgba(0,0,0,0.2);
+}
+
+button {
+    padding: 10px 20px;
+    margin: 10px;
+    font-size: 16px;
+    cursor: pointer;
+}
+
+.result {
+    margin-top: 20px;
+    text-align: left;
+}
+</style>
+
+</head>
+<body>
+
+<div class="container">
+
+<h2>Reddit Mail Worker Panel</h2>
+
+<button onclick="getAccount()">Get New Mail</button>
+
+<div id="account"></div>
+
+<button onclick="checkMail()">Check Reddit Mail</button>
+
+<button onclick="getAccount()">Next Mail</button>
+
+<div class="result" id="result"></div>
+
+</div>
+
+<script>
+
+let current = null;
+
+function getAccount(){
+
+fetch("/get_account")
+.then(res => res.json())
+.then(data => {
+
+if(data.status === "empty"){
+alert("No accounts available");
+return;
+}
+
+current = data;
+
+document.getElementById("account").innerHTML =
+"<b>Email:</b> " + data.email + "<br>" +
+"<b>Password:</b> " + data.password;
+
+document.getElementById("result").innerHTML = "";
+
+});
+}
+
+function checkMail(){
+
+if(!current){
+alert("Get account first");
+return;
+}
+
+fetch("/check_mail", {
+
+method: "POST",
+headers: {"Content-Type": "application/json"},
+body: JSON.stringify(current)
+
+})
+.then(res => res.json())
+.then(data => {
+
+if(data.mails.length === 0){
+
+document.getElementById("result").innerHTML =
+"<b>No Reddit mails found</b>";
+
+return;
+}
+
+let html = "";
+
+data.mails.forEach(mail => {
+
+html += "<b>From:</b> " + mail.from + "<br>";
+html += "<b>Subject:</b> " + mail.subject + "<hr>";
+
+});
+
+document.getElementById("result").innerHTML = html;
+
+});
+}
+
+</script>
+
+</body>
+</html>
