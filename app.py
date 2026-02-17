@@ -229,20 +229,33 @@ def add_accounts(text):
 
     for line in lines:
 
-        parts = line.strip().split(":")
+        line = line.strip()
 
+        if not line:
+            continue
+
+        parts = line.split(":")
+
+        # Must have at least 4 parts
         if len(parts) < 4:
             continue
+
+        email = parts[0]
+        password = parts[1]
+
+        # Always take last 2 fields as refresh_token and client_id
+        refresh_token = parts[-2]
+        client_id = parts[-1]
 
         c.execute("""
             INSERT INTO accounts
             (email,password,refresh_token,client_id,status,assigned_at)
             VALUES (?,?,?,?,?,NULL)
         """, (
-            parts[0],
-            parts[1],
-            parts[2],
-            parts[3],
+            email,
+            password,
+            refresh_token,
+            client_id,
             "AVAILABLE"
         ))
 
@@ -252,6 +265,7 @@ def add_accounts(text):
     conn.close()
 
     return added
+
 
 
 # =========================
