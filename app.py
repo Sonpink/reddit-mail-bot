@@ -5,6 +5,7 @@ import requests
 import imaplib
 import email
 import re
+import time
 from flask import Flask, render_template, request, jsonify, session, redirect
 
 app = Flask(__name__)
@@ -12,7 +13,7 @@ app.secret_key = "secretkey123"
 
 
 # =========================
-# Render-safe paths
+# Configuration
 # =========================
 
 BASE_DIR = "/opt/render/project/src"
@@ -24,9 +25,12 @@ ADMIN_PASSWORD = "123456"
 
 REDDIT_SENDER = "noreply@redditmail.com"
 
+# timeout in seconds (5 minutes)
+LEASE_TIMEOUT = 300
+
 
 # =========================
-# Database Initialization
+# Initialize database
 # =========================
 
 def init_db():
@@ -43,7 +47,8 @@ def init_db():
             password TEXT,
             refresh_token TEXT,
             client_id TEXT,
-            status TEXT
+            status TEXT,
+            assigned_at INTEGER
         )
     """)
 
@@ -55,10 +60,36 @@ init_db()
 
 
 # =========================
-# Get Stats for Admin
+# Reset expired IN_USE accounts
+# =========================
+
+def reset_expired_accounts():
+
+    now = int(time.time())
+
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    c = conn.cursor()
+
+    c.execute("""
+        UPDATE accounts
+        SET status='AVAILABLE',
+            assigned_at=NULL
+        WHERE status='IN_USE'
+        AND assigned_at IS NOT NULL
+        AND (? - assigned_at) > ?
+    """, (now, LEASE_TIMEOUT))
+
+    conn.commit()
+    conn.close()
+
+
+# =========================
+# Get Stats
 # =========================
 
 def get_stats():
+
+    reset_expired_accounts()
 
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     c = conn.cursor()
@@ -82,12 +113,16 @@ def get_stats():
 
 
 # =========================
-# Get next account
+# Get account safely
 # =========================
 
 def get_account():
 
     with LOCK:
+
+        reset_expired_accounts()
+
+        now = int(time.time())
 
         conn = sqlite3.connect(DB_FILE, check_same_thread=False)
         c = conn.cursor()
@@ -109,9 +144,10 @@ def get_account():
 
         c.execute("""
             UPDATE accounts
-            SET status='IN_USE'
+            SET status='IN_USE',
+                assigned_at=?
             WHERE id=?
-        """, (account_id,))
+        """, (now, account_id))
 
         conn.commit()
         conn.close()
@@ -136,7 +172,8 @@ def mark_used(account_id):
 
     c.execute("""
         UPDATE accounts
-        SET status='USED'
+        SET status='USED',
+            assigned_at=NULL
         WHERE id=?
     """, (account_id,))
 
@@ -145,7 +182,7 @@ def mark_used(account_id):
 
 
 # =========================
-# Mark Available Again
+# Mark Available
 # =========================
 
 def mark_available(account_id):
@@ -155,7 +192,8 @@ def mark_available(account_id):
 
     c.execute("""
         UPDATE accounts
-        SET status='AVAILABLE'
+        SET status='AVAILABLE',
+            assigned_at=NULL
         WHERE id=?
     """, (account_id,))
 
@@ -185,8 +223,8 @@ def add_accounts(text):
 
         c.execute("""
             INSERT INTO accounts
-            (email,password,refresh_token,client_id,status)
-            VALUES (?,?,?,?,?)
+            (email,password,refresh_token,client_id,status,assigned_at)
+            VALUES (?,?,?,?,?,NULL)
         """, (
             parts[0],
             parts[1],
@@ -204,7 +242,7 @@ def add_accounts(text):
 
 
 # =========================
-# Get Access Token
+# Token
 # =========================
 
 def get_token(refresh_token, client_id):
@@ -232,7 +270,7 @@ def get_token(refresh_token, client_id):
 
 
 # =========================
-# Get OTP
+# OTP
 # =========================
 
 def get_otp(email_addr, token):
@@ -323,10 +361,6 @@ def route_skip():
     return jsonify({"ok": True})
 
 
-# =========================
-# Admin Login + Dashboard
-# =========================
-
 @app.route("/admin", methods=["GET", "POST"])
 def admin():
 
@@ -342,10 +376,7 @@ def admin():
 
     stats = get_stats()
 
-    return render_template(
-        "admin.html",
-        stats=stats
-    )
+    return render_template("admin.html", stats=stats)
 
 
 @app.route("/add_accounts", methods=["POST"])
@@ -358,16 +389,4 @@ def route_add_accounts():
 
     stats = get_stats()
 
-    return render_template(
-        "admin.html",
-        stats=stats,
-        added=added
-    )
-
-
-# =========================
-# Render Port Binding
-# =========================
-
-if __name__ == "__main__":
-    app.run(debug=True)
+    return render_template("admin.html", stats=stats, added=added)
