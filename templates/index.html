@@ -16,29 +16,17 @@ body {
 .container {
     background: #0b1220;
     padding: 30px;
-    width: 500px;
+    width: 700px;
     margin: auto;
     border-radius: 12px;
     box-shadow: 0 0 20px rgba(0,0,0,0.5);
 }
 
-h2 {
-    margin-bottom: 25px;
-}
-
-.label {
-    text-align: left;
-    margin-top: 15px;
-    color: #94a3b8;
-    font-size: 14px;
-}
-
 .account-box {
-
     background: #020617;
     border: 1px solid #1e293b;
-    padding: 15px;
-    margin: 10px 0;
+    padding: 12px;
+    margin: 8px 0;
     border-radius: 8px;
     display: flex;
     justify-content: space-between;
@@ -47,12 +35,11 @@ h2 {
 
 .account-text {
     color: #38bdf8;
-    font-size: 16px;
+    font-size: 14px;
     word-break: break-all;
 }
 
 .copy-btn {
-
     background: #1e293b;
     border: none;
     color: white;
@@ -66,7 +53,6 @@ h2 {
 }
 
 .main-btn {
-
     background: linear-gradient(90deg, #0284c7, #06b6d4);
     border: none;
     color: white;
@@ -78,14 +64,8 @@ h2 {
     width: 80%;
 }
 
-.main-btn:hover {
-    opacity: 0.9;
-}
-
 .result {
-
     margin-top: 20px;
-    text-align: center;
     background: #020617;
     padding: 20px;
     border-radius: 8px;
@@ -94,15 +74,31 @@ h2 {
     font-weight: bold;
 }
 
-.status {
+.history-container {
+    margin-top: 20px;
+    background: #020617;
+    padding: 20px;
+    border-radius: 8px;
+}
 
-    margin-top: 15px;
-    color: #94a3b8;
-    font-size: 14px;
+.history-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.history-item {
+    flex: 1;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #0b1220;
+    padding: 8px;
+    border-radius: 6px;
 }
 
 </style>
-
 </head>
 
 <body>
@@ -113,14 +109,10 @@ h2 {
 
 <button class="main-btn" onclick="getAccount()">Get New Mail</button>
 
-<div class="label">EMAIL</div>
-
 <div class="account-box">
     <div class="account-text" id="emailText">-</div>
     <button class="copy-btn" onclick="copyText('emailText', this)">Copy</button>
 </div>
-
-<div class="label">PASSWORD</div>
 
 <div class="account-box">
     <div class="account-text" id="passwordText">-</div>
@@ -133,144 +125,130 @@ h2 {
 Latest OTP: Waiting...
 </div>
 
-<div class="status" id="statusText"></div>
-
+<div class="history-container">
+<h3>Recent Used Accounts</h3>
+<div id="historyBox"></div>
 </div>
 
+</div>
 
 <script>
 
 let current = null;
 let checkingInterval = null;
 
-
-// Get new account
 function getAccount(){
-
 fetch("/get_account")
 .then(res => res.json())
 .then(data => {
 
 if(data.status === "empty"){
-
 alert("No accounts available");
 return;
-
 }
 
 current = data;
-
 document.getElementById("emailText").innerText = data.email;
 document.getElementById("passwordText").innerText = data.password;
-
 document.getElementById("otpBox").innerText = "Latest OTP: Waiting...";
-document.getElementById("statusText").innerText = "Checking inbox automatically...";
-
 startChecking();
-
 });
 }
 
-
-// Start auto OTP checking
 function startChecking(){
-
-if(checkingInterval){
-clearInterval(checkingInterval);
-}
-
+if(checkingInterval) clearInterval(checkingInterval);
 checkingInterval = setInterval(checkOTP, 5000);
-
 }
 
-
-// Check OTP
 function checkOTP(){
-
 if(!current) return;
 
 fetch("/check_otp", {
-
 method: "POST",
 headers: {"Content-Type": "application/json"},
 body: JSON.stringify(current)
-
 })
 .then(res => res.json())
 .then(data => {
 
 if(data.otp){
-
 document.getElementById("otpBox").innerText =
 "Latest OTP: " + data.otp;
 
-document.getElementById("statusText").innerText =
-"OTP received successfully";
-
 clearInterval(checkingInterval);
-
+loadHistory();
 }
-
 });
-
 }
 
-
-// Next mail with confirmation
 function nextMail(){
-
 if(!current){
 alert("Get account first");
 return;
 }
 
-if(!confirm("Are you sure you want to skip this account?")){
-return;
-}
-
 fetch("/skip", {
-
 method: "POST",
 headers: {"Content-Type": "application/json"},
 body: JSON.stringify(current)
-
 })
 .then(() => {
-
 current = null;
-
 document.getElementById("emailText").innerText = "-";
 document.getElementById("passwordText").innerText = "-";
-
 document.getElementById("otpBox").innerText =
 "Latest OTP: Waiting...";
-
-document.getElementById("statusText").innerText =
-"Account skipped. Click Get New Mail.";
-
-clearInterval(checkingInterval);
-
 });
-
 }
 
+function loadHistory(){
+fetch("/recent_used")
+.then(res => res.json())
+.then(data => {
 
-// Copy function
+let box = document.getElementById("historyBox");
+box.innerHTML = "";
+
+data.forEach((item, index) => {
+
+box.innerHTML += `
+<div class="history-row">
+
+<div class="history-item">
+<span class="account-text" id="h_email_${index}">
+${item.email}
+</span>
+<button class="copy-btn" onclick="copyText('h_email_${index}', this)">Copy</button>
+</div>
+
+<div class="history-item">
+<span class="account-text" id="h_pass_${index}">
+${item.password}
+</span>
+<button class="copy-btn" onclick="copyText('h_pass_${index}', this)">Copy</button>
+</div>
+
+<div class="history-item">
+<span class="account-text" id="h_otp_${index}">
+${item.otp}
+</span>
+<button class="copy-btn" onclick="copyText('h_otp_${index}', this)">Copy</button>
+</div>
+
+</div>
+`;
+});
+});
+}
+
 function copyText(id, btn){
-
 let text = document.getElementById(id).innerText;
-
 navigator.clipboard.writeText(text);
-
 btn.innerText = "Copied!";
-
-setTimeout(() => {
-
-btn.innerText = "Copy";
-
-}, 1500);
-
+setTimeout(() => { btn.innerText = "Copy"; }, 1500);
 }
+
+loadHistory();
 
 </script>
 
