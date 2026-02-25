@@ -11,7 +11,7 @@ app = Flask(__name__)
 app.secret_key = "secretkey123"
 
 # =====================================================
-# DATABASE CONFIG
+# DATABASE CONFIG (Persistent Disk)
 # =====================================================
 
 DB_FILE = "/var/data/accounts.db"
