@@ -6,11 +6,14 @@ import imaplib
 import email
 import re
 import time
-import uuid
 from flask import Flask, render_template, request, jsonify, session, redirect, Response
 
 app = Flask(__name__)
 app.secret_key = "secretkey123"
+
+# =====================================================
+# DATABASE CONFIG
+# =====================================================
 
 PERSISTENT_DIR = "/opt/render/project/src"
 DB_FILE = os.path.join(PERSISTENT_DIR, "accounts.db")
@@ -25,7 +28,7 @@ LEASE_TIMEOUT = 300
 
 
 # =====================================================
-# DATABASE INIT
+# DATABASE INIT (ORIGINAL STRUCTURE)
 # =====================================================
 
 def init_db():
@@ -40,10 +43,7 @@ def init_db():
             refresh_token TEXT,
             client_id TEXT,
             status TEXT,
-            assigned_at INTEGER,
-            worker_id TEXT,
-            otp TEXT,
-            used_at INTEGER
+            assigned_at INTEGER
         )
     """)
 
@@ -55,19 +55,19 @@ init_db()
 
 
 # =====================================================
-# RESET EXPIRED
+# RESET EXPIRED IN_USE ACCOUNTS
 # =====================================================
 
 def reset_expired_accounts():
     now = int(time.time())
+
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     c = conn.cursor()
 
     c.execute("""
         UPDATE accounts
         SET status='AVAILABLE',
-            assigned_at=NULL,
-            worker_id=NULL
+            assigned_at=NULL
         WHERE status='IN_USE'
         AND assigned_at IS NOT NULL
         AND (? - assigned_at) > ?
@@ -83,7 +83,9 @@ def reset_expired_accounts():
 
 def get_account():
     with LOCK:
+
         reset_expired_accounts()
+
         now = int(time.time())
 
         conn = sqlite3.connect(DB_FILE, check_same_thread=False)
@@ -123,18 +125,16 @@ def get_account():
         }
 
 
-def mark_used(account_id, otp):
+def mark_used(account_id):
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     c = conn.cursor()
 
     c.execute("""
         UPDATE accounts
         SET status='USED',
-            assigned_at=NULL,
-            otp=?,
-            used_at=?
+            assigned_at=NULL
         WHERE id=?
-    """, (otp, int(time.time()), account_id))
+    """, (account_id,))
 
     conn.commit()
     conn.close()
@@ -156,7 +156,7 @@ def mark_available(account_id):
 
 
 # =====================================================
-# TOKEN + OTP
+# OUTLOOK TOKEN + OTP
 # =====================================================
 
 def get_token(refresh_token, client_id):
@@ -171,9 +171,12 @@ def get_token(refresh_token, client_id):
             },
             timeout=10
         )
+
         if r.status_code != 200:
             return None
+
         return r.json().get("access_token")
+
     except:
         return None
 
@@ -181,6 +184,7 @@ def get_token(refresh_token, client_id):
 def get_otp(email_addr, token):
     try:
         auth = f"user={email_addr}\1auth=Bearer {token}\1\1"
+
         imap = imaplib.IMAP4_SSL("outlook.office365.com")
         imap.authenticate("XOAUTH2", lambda x: auth)
         imap.select("INBOX")
@@ -197,11 +201,13 @@ def get_otp(email_addr, token):
             if REDDIT_SENDER in sender.lower():
                 subject = msg.get("Subject", "")
                 match = re.search(r"\d{6}", subject)
+
                 if match:
                     imap.logout()
                     return match.group()
 
         imap.logout()
+
     except:
         return None
 
@@ -220,30 +226,37 @@ def index():
 @app.route("/get_account")
 def route_get_account():
     acc = get_account()
+
     if not acc:
         return jsonify({"status": "empty"})
+
     return jsonify({"status": "ok", **acc})
 
 
 @app.route("/check_otp", methods=["POST"])
 def route_check_otp():
+
     data = request.json
+
     token = get_token(data["refresh_token"], data["client_id"])
+
     if not token:
         return jsonify({"otp": None})
 
     otp = get_otp(data["email"], token)
 
     if otp:
-        mark_used(data["id"], otp)
+        mark_used(data["id"])
 
     return jsonify({"otp": otp})
 
 
 @app.route("/skip", methods=["POST"])
 def route_skip():
+
     data = request.json
     mark_available(data["id"])
+
     return jsonify({"ok": True})
 
 
@@ -252,6 +265,7 @@ def route_skip():
 # =====================================================
 
 def get_stats():
+
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     c = conn.cursor()
 
@@ -285,11 +299,96 @@ def admin():
         return render_template("admin_login.html")
 
     stats = get_stats()
+
     return render_template("admin.html", stats=stats)
 
 
+@app.route("/add_accounts", methods=["POST"])
+def route_add_accounts():
+
+    if not session.get("admin"):
+        return "Unauthorized"
+
+    text = request.form.get("accounts", "")
+
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    c = conn.cursor()
+
+    lines = text.strip().split("\n")
+
+    for line in lines:
+
+        line = line.strip()
+        if not line:
+            continue
+
+        parts = line.split(":")
+        if len(parts) < 4:
+            continue
+
+        email = parts[0]
+        password = parts[1]
+        refresh_token = parts[-2]
+        client_id = parts[-1]
+
+        try:
+            c.execute("""
+                INSERT OR IGNORE INTO accounts
+                (email,password,refresh_token,client_id,status,assigned_at)
+                VALUES (?,?,?,?,?,NULL)
+            """, (
+                email,
+                password,
+                refresh_token,
+                client_id,
+                "AVAILABLE"
+            ))
+        except:
+            pass
+
+    conn.commit()
+    conn.close()
+
+    return redirect("/admin")
+
+
+@app.route("/delete_used", methods=["POST"])
+def route_delete_used():
+
+    if not session.get("admin"):
+        return "Unauthorized"
+
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    c = conn.cursor()
+    c.execute("DELETE FROM accounts WHERE status='USED'")
+    conn.commit()
+    conn.close()
+
+    return redirect("/admin")
+
+
+@app.route("/delete_all", methods=["POST"])
+def route_delete_all():
+
+    if not session.get("admin"):
+        return "Unauthorized"
+
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    c = conn.cursor()
+    c.execute("DELETE FROM accounts")
+    conn.commit()
+    conn.close()
+
+    return redirect("/admin")
+
+
+# =====================================================
+# EXPORT AVAILABLE ACCOUNTS
+# =====================================================
+
 @app.route("/export_available")
 def export_available():
+
     if not session.get("admin"):
         return "Unauthorized"
 
@@ -306,6 +405,7 @@ def export_available():
     conn.close()
 
     lines = []
+
     for r in rows:
         lines.append(f"{r[0]}:{r[1]}:{r[2]}:{r[3]}")
 
