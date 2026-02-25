@@ -15,7 +15,6 @@ app.secret_key = "secretkey123"
 # =====================================================
 
 DB_FILE = "/var/data/accounts.db"
-
 LOCK = threading.Lock()
 
 ADMIN_PASSWORD = "123456"
@@ -24,7 +23,7 @@ LEASE_TIMEOUT = 300
 
 
 # =====================================================
-# DATABASE INIT
+# DATABASE INIT (Lazy — SAFE FOR GUNICORN)
 # =====================================================
 
 def init_db():
@@ -45,10 +44,6 @@ def init_db():
 
     conn.commit()
     conn.close()
-
-
-# Initialize DB at startup
-init_db()
 
 
 # =====================================================
@@ -79,10 +74,11 @@ def reset_expired_accounts():
 # =====================================================
 
 def get_account():
+    init_db()
+
     with LOCK:
 
         reset_expired_accounts()
-
         now = int(time.time())
 
         conn = sqlite3.connect(DB_FILE)
@@ -123,6 +119,8 @@ def get_account():
 
 
 def mark_used(account_id):
+    init_db()
+
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
 
@@ -138,6 +136,8 @@ def mark_used(account_id):
 
 
 def mark_available(account_id):
+    init_db()
+
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
 
@@ -181,6 +181,7 @@ def route_skip():
 # =====================================================
 
 def get_stats():
+    init_db()
 
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -224,15 +225,15 @@ def route_add_accounts():
     if not session.get("admin"):
         return "Unauthorized"
 
-    text = request.form.get("accounts", "")
+    init_db()
 
+    text = request.form.get("accounts", "")
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
 
     lines = text.strip().split("\n")
 
     for line in lines:
-
         line = line.strip()
         if not line:
             continue
@@ -269,6 +270,8 @@ def export_available():
 
     if not session.get("admin"):
         return "Unauthorized"
+
+    init_db()
 
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
