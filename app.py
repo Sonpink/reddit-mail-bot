@@ -272,6 +272,9 @@ def route_skip():
 
 def get_stats():
 
+    # Ensure table exists
+    init_db()
+
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
 
