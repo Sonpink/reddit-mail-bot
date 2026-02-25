@@ -12,7 +12,6 @@ app.secret_key = "secretkey123"
 
 DB_FILE = "/var/data/accounts.db"
 LOCK = threading.Lock()
-
 ADMIN_PASSWORD = "123456"
 LEASE_TIMEOUT = 300
 
@@ -39,6 +38,10 @@ def init_db():
     conn.close()
 
 
+# Initialize DB immediately on startup (IMPORTANT)
+init_db()
+
+
 def reset_expired_accounts():
     now = int(time.time())
     conn = sqlite3.connect(DB_FILE)
@@ -59,8 +62,6 @@ def reset_expired_accounts():
 # ===============================
 
 def get_account():
-    init_db()
-
     with LOCK:
         reset_expired_accounts()
         now = int(time.time())
@@ -230,7 +231,6 @@ def route_skip():
 # ===============================
 
 def get_stats():
-    init_db()
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
 
@@ -270,8 +270,6 @@ def admin():
 def route_add_accounts():
     if not session.get("admin"):
         return "Unauthorized"
-
-    init_db()
 
     text = request.form.get("accounts", "")
     conn = sqlite3.connect(DB_FILE)
