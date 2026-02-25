@@ -38,7 +38,7 @@ def init_db():
     conn.close()
 
 
-# Initialize DB immediately on startup (IMPORTANT)
+# Initialize DB immediately on startup
 init_db()
 
 
@@ -142,11 +142,9 @@ def get_token(refresh_token, client_id):
             timeout=10
         )
         if r.status_code != 200:
-            print("TOKEN ERROR:", r.status_code, r.text)
             return None
         return r.json().get("access_token")
-    except Exception as e:
-        print("TOKEN EXCEPTION:", e)
+    except:
         return None
 
 
@@ -173,8 +171,8 @@ def get_otp(email_addr, token):
                     return match.group()
 
         imap.logout()
-    except Exception as e:
-        print("IMAP ERROR:", e)
+    except:
+        pass
 
     return None
 
@@ -224,6 +222,33 @@ def route_skip():
     data = request.json
     mark_available(data["id"])
     return jsonify({"ok": True})
+
+
+@app.route("/recent_used")
+def recent_used():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+
+    c.execute("""
+        SELECT email, password
+        FROM accounts
+        WHERE status='USED'
+        ORDER BY id DESC
+        LIMIT 10
+    """)
+
+    rows = c.fetchall()
+    conn.close()
+
+    result = []
+    for row in rows:
+        result.append({
+            "email": row[0],
+            "password": row[1],
+            "otp": "✓"
+        })
+
+    return jsonify(result)
 
 
 # ===============================
