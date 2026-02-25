@@ -226,6 +226,9 @@ def get_otp(email_addr, token):
 def index():
     return render_template("index.html")
 
+@app.route("/db_path")
+def db_path():
+    return DB_FILE
 
 @app.route("/get_account")
 def route_get_account():
