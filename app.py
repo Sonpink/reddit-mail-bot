@@ -7,7 +7,7 @@ import email
 import re
 import time
 import uuid
-from flask import Flask, render_template, request, jsonify, session, redirect
+from flask import Flask, render_template, request, jsonify, session, redirect, Response
 
 app = Flask(__name__)
 app.secret_key = "secretkey123"
@@ -25,7 +25,7 @@ LEASE_TIMEOUT = 300
 
 
 # =====================================================
-# DATABASE INIT + SAFE MIGRATION
+# DATABASE INIT
 # =====================================================
 
 def init_db():
@@ -40,25 +40,12 @@ def init_db():
             refresh_token TEXT,
             client_id TEXT,
             status TEXT,
-            assigned_at INTEGER
+            assigned_at INTEGER,
+            worker_id TEXT,
+            otp TEXT,
+            used_at INTEGER
         )
     """)
-
-    # Safe column additions (ignore if exists)
-    try:
-        c.execute("ALTER TABLE accounts ADD COLUMN worker_id TEXT")
-    except:
-        pass
-
-    try:
-        c.execute("ALTER TABLE accounts ADD COLUMN otp TEXT")
-    except:
-        pass
-
-    try:
-        c.execute("ALTER TABLE accounts ADD COLUMN used_at INTEGER")
-    except:
-        pass
 
     conn.commit()
     conn.close()
@@ -68,17 +55,7 @@ init_db()
 
 
 # =====================================================
-# WORKER SESSION ID
-# =====================================================
-
-def ensure_worker():
-    if "worker_id" not in session:
-        session["worker_id"] = str(uuid.uuid4())
-    return session["worker_id"]
-
-
-# =====================================================
-# RESET EXPIRED IN_USE ACCOUNTS
+# RESET EXPIRED
 # =====================================================
 
 def reset_expired_accounts():
@@ -107,7 +84,6 @@ def reset_expired_accounts():
 def get_account():
     with LOCK:
         reset_expired_accounts()
-        worker_id = ensure_worker()
         now = int(time.time())
 
         conn = sqlite3.connect(DB_FILE, check_same_thread=False)
@@ -131,10 +107,9 @@ def get_account():
         c.execute("""
             UPDATE accounts
             SET status='IN_USE',
-                assigned_at=?,
-                worker_id=?
+                assigned_at=?
             WHERE id=?
-        """, (now, worker_id, account_id))
+        """, (now, account_id))
 
         conn.commit()
         conn.close()
@@ -149,7 +124,6 @@ def get_account():
 
 
 def mark_used(account_id, otp):
-    worker_id = ensure_worker()
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     c = conn.cursor()
 
@@ -158,10 +132,9 @@ def mark_used(account_id, otp):
         SET status='USED',
             assigned_at=NULL,
             otp=?,
-            used_at=?,
-            worker_id=?
+            used_at=?
         WHERE id=?
-    """, (otp, int(time.time()), worker_id, account_id))
+    """, (otp, int(time.time()), account_id))
 
     conn.commit()
     conn.close()
@@ -174,8 +147,7 @@ def mark_available(account_id):
     c.execute("""
         UPDATE accounts
         SET status='AVAILABLE',
-            assigned_at=NULL,
-            worker_id=NULL
+            assigned_at=NULL
         WHERE id=?
     """, (account_id,))
 
@@ -184,7 +156,7 @@ def mark_available(account_id):
 
 
 # =====================================================
-# OUTLOOK TOKEN + OTP
+# TOKEN + OTP
 # =====================================================
 
 def get_token(refresh_token, client_id):
@@ -199,12 +171,9 @@ def get_token(refresh_token, client_id):
             },
             timeout=10
         )
-
         if r.status_code != 200:
             return None
-
         return r.json().get("access_token")
-
     except:
         return None
 
@@ -212,7 +181,6 @@ def get_token(refresh_token, client_id):
 def get_otp(email_addr, token):
     try:
         auth = f"user={email_addr}\1auth=Bearer {token}\1\1"
-
         imap = imaplib.IMAP4_SSL("outlook.office365.com")
         imap.authenticate("XOAUTH2", lambda x: auth)
         imap.select("INBOX")
@@ -229,13 +197,11 @@ def get_otp(email_addr, token):
             if REDDIT_SENDER in sender.lower():
                 subject = msg.get("Subject", "")
                 match = re.search(r"\d{6}", subject)
-
                 if match:
                     imap.logout()
                     return match.group()
 
         imap.logout()
-
     except:
         return None
 
@@ -248,7 +214,6 @@ def get_otp(email_addr, token):
 
 @app.route("/")
 def index():
-    ensure_worker()
     return render_template("index.html")
 
 
@@ -264,7 +229,6 @@ def route_get_account():
 def route_check_otp():
     data = request.json
     token = get_token(data["refresh_token"], data["client_id"])
-
     if not token:
         return jsonify({"otp": None})
 
@@ -283,33 +247,8 @@ def route_skip():
     return jsonify({"ok": True})
 
 
-@app.route("/recent_used")
-def recent_used():
-    worker_id = ensure_worker()
-
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-    c = conn.cursor()
-
-    c.execute("""
-        SELECT email,password,otp
-        FROM accounts
-        WHERE status='USED'
-        AND worker_id=?
-        ORDER BY used_at DESC
-        LIMIT 5
-    """, (worker_id,))
-
-    rows = c.fetchall()
-    conn.close()
-
-    return jsonify([
-        {"email": r[0], "password": r[1], "otp": r[2]}
-        for r in rows
-    ])
-
-
 # =====================================================
-# ADMIN SECTION
+# ADMIN
 # =====================================================
 
 def get_stats():
@@ -334,61 +273,6 @@ def get_stats():
     }
 
 
-def add_accounts(text):
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-    c = conn.cursor()
-
-    lines = text.strip().split("\n")
-
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-
-        parts = line.split(":")
-        if len(parts) < 4:
-            continue
-
-        email = parts[0]
-        password = parts[1]
-        refresh_token = parts[-2]
-        client_id = parts[-1]
-
-        try:
-            c.execute("""
-                INSERT OR IGNORE INTO accounts
-                (email,password,refresh_token,client_id,status,assigned_at)
-                VALUES (?,?,?,?,?,NULL)
-            """, (
-                email,
-                password,
-                refresh_token,
-                client_id,
-                "AVAILABLE"
-            ))
-        except:
-            pass
-
-    conn.commit()
-    conn.close()
-
-
-def delete_used_accounts():
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-    c = conn.cursor()
-    c.execute("DELETE FROM accounts WHERE status='USED'")
-    conn.commit()
-    conn.close()
-
-
-def delete_all_accounts():
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-    c = conn.cursor()
-    c.execute("DELETE FROM accounts")
-    conn.commit()
-    conn.close()
-
-
 @app.route("/admin", methods=["GET", "POST"])
 def admin():
 
@@ -404,25 +288,33 @@ def admin():
     return render_template("admin.html", stats=stats)
 
 
-@app.route("/add_accounts", methods=["POST"])
-def route_add_accounts():
+@app.route("/export_available")
+def export_available():
     if not session.get("admin"):
         return "Unauthorized"
-    add_accounts(request.form.get("accounts", ""))
-    return redirect("/admin")
 
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    c = conn.cursor()
 
-@app.route("/delete_used", methods=["POST"])
-def route_delete_used():
-    if not session.get("admin"):
-        return "Unauthorized"
-    delete_used_accounts()
-    return redirect("/admin")
+    c.execute("""
+        SELECT email,password,refresh_token,client_id
+        FROM accounts
+        WHERE status='AVAILABLE'
+    """)
 
+    rows = c.fetchall()
+    conn.close()
 
-@app.route("/delete_all", methods=["POST"])
-def route_delete_all():
-    if not session.get("admin"):
-        return "Unauthorized"
-    delete_all_accounts()
-    return redirect("/admin")
+    lines = []
+    for r in rows:
+        lines.append(f"{r[0]}:{r[1]}:{r[2]}:{r[3]}")
+
+    content = "\n".join(lines)
+
+    return Response(
+        content,
+        mimetype="text/plain",
+        headers={
+            "Content-Disposition": "attachment;filename=available_accounts_backup.txt"
+        }
+    )
