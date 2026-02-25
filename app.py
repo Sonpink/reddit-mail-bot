@@ -24,9 +24,9 @@ REDDIT_SENDER = "noreply@redditmail.com"
 LEASE_TIMEOUT = 300
 
 
-# ===============================
+# =====================================================
 # DATABASE INIT + SAFE MIGRATION
-# ===============================
+# =====================================================
 
 def init_db():
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
@@ -44,7 +44,7 @@ def init_db():
         )
     """)
 
-    # Safe column additions (ignore if already exists)
+    # Safe column additions (ignore if exists)
     try:
         c.execute("ALTER TABLE accounts ADD COLUMN worker_id TEXT")
     except:
@@ -67,9 +67,9 @@ def init_db():
 init_db()
 
 
-# ===============================
+# =====================================================
 # WORKER SESSION ID
-# ===============================
+# =====================================================
 
 def ensure_worker():
     if "worker_id" not in session:
@@ -77,9 +77,9 @@ def ensure_worker():
     return session["worker_id"]
 
 
-# ===============================
-# RESET EXPIRED
-# ===============================
+# =====================================================
+# RESET EXPIRED IN_USE ACCOUNTS
+# =====================================================
 
 def reset_expired_accounts():
     now = int(time.time())
@@ -100,9 +100,9 @@ def reset_expired_accounts():
     conn.close()
 
 
-# ===============================
+# =====================================================
 # ACCOUNT ASSIGNMENT
-# ===============================
+# =====================================================
 
 def get_account():
     with LOCK:
@@ -119,6 +119,7 @@ def get_account():
             WHERE status='AVAILABLE'
             LIMIT 1
         """)
+
         row = c.fetchone()
 
         if not row:
@@ -182,9 +183,9 @@ def mark_available(account_id):
     conn.close()
 
 
-# ===============================
+# =====================================================
 # OUTLOOK TOKEN + OTP
-# ===============================
+# =====================================================
 
 def get_token(refresh_token, client_id):
     try:
@@ -198,9 +199,12 @@ def get_token(refresh_token, client_id):
             },
             timeout=10
         )
+
         if r.status_code != 200:
             return None
+
         return r.json().get("access_token")
+
     except:
         return None
 
@@ -208,6 +212,7 @@ def get_token(refresh_token, client_id):
 def get_otp(email_addr, token):
     try:
         auth = f"user={email_addr}\1auth=Bearer {token}\1\1"
+
         imap = imaplib.IMAP4_SSL("outlook.office365.com")
         imap.authenticate("XOAUTH2", lambda x: auth)
         imap.select("INBOX")
@@ -220,23 +225,26 @@ def get_otp(email_addr, token):
             msg = email.message_from_bytes(msg_data[0][1])
 
             sender = msg.get("From", "")
+
             if REDDIT_SENDER in sender.lower():
                 subject = msg.get("Subject", "")
                 match = re.search(r"\d{6}", subject)
+
                 if match:
                     imap.logout()
                     return match.group()
 
         imap.logout()
+
     except:
         return None
 
     return None
 
 
-# ===============================
+# =====================================================
 # ROUTES
-# ===============================
+# =====================================================
 
 @app.route("/")
 def index():
@@ -256,6 +264,7 @@ def route_get_account():
 def route_check_otp():
     data = request.json
     token = get_token(data["refresh_token"], data["client_id"])
+
     if not token:
         return jsonify({"otp": None})
 
@@ -293,12 +302,127 @@ def recent_used():
     rows = c.fetchall()
     conn.close()
 
-    result = []
-    for r in rows:
-        result.append({
-            "email": r[0],
-            "password": r[1],
-            "otp": r[2]
-        })
+    return jsonify([
+        {"email": r[0], "password": r[1], "otp": r[2]}
+        for r in rows
+    ])
 
-    return jsonify(result)
+
+# =====================================================
+# ADMIN SECTION
+# =====================================================
+
+def get_stats():
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    c = conn.cursor()
+
+    c.execute("SELECT COUNT(*) FROM accounts WHERE status='AVAILABLE'")
+    available = c.fetchone()[0]
+
+    c.execute("SELECT COUNT(*) FROM accounts WHERE status='IN_USE'")
+    in_use = c.fetchone()[0]
+
+    c.execute("SELECT COUNT(*) FROM accounts WHERE status='USED'")
+    used = c.fetchone()[0]
+
+    conn.close()
+
+    return {
+        "available": available,
+        "in_use": in_use,
+        "used": used
+    }
+
+
+def add_accounts(text):
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    c = conn.cursor()
+
+    lines = text.strip().split("\n")
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+
+        parts = line.split(":")
+        if len(parts) < 4:
+            continue
+
+        email = parts[0]
+        password = parts[1]
+        refresh_token = parts[-2]
+        client_id = parts[-1]
+
+        try:
+            c.execute("""
+                INSERT OR IGNORE INTO accounts
+                (email,password,refresh_token,client_id,status,assigned_at)
+                VALUES (?,?,?,?,?,NULL)
+            """, (
+                email,
+                password,
+                refresh_token,
+                client_id,
+                "AVAILABLE"
+            ))
+        except:
+            pass
+
+    conn.commit()
+    conn.close()
+
+
+def delete_used_accounts():
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    c = conn.cursor()
+    c.execute("DELETE FROM accounts WHERE status='USED'")
+    conn.commit()
+    conn.close()
+
+
+def delete_all_accounts():
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    c = conn.cursor()
+    c.execute("DELETE FROM accounts")
+    conn.commit()
+    conn.close()
+
+
+@app.route("/admin", methods=["GET", "POST"])
+def admin():
+
+    if request.method == "POST":
+        if request.form.get("password") == ADMIN_PASSWORD:
+            session["admin"] = True
+            return redirect("/admin")
+
+    if not session.get("admin"):
+        return render_template("admin_login.html")
+
+    stats = get_stats()
+    return render_template("admin.html", stats=stats)
+
+
+@app.route("/add_accounts", methods=["POST"])
+def route_add_accounts():
+    if not session.get("admin"):
+        return "Unauthorized"
+    add_accounts(request.form.get("accounts", ""))
+    return redirect("/admin")
+
+
+@app.route("/delete_used", methods=["POST"])
+def route_delete_used():
+    if not session.get("admin"):
+        return "Unauthorized"
+    delete_used_accounts()
+    return redirect("/admin")
+
+
+@app.route("/delete_all", methods=["POST"])
+def route_delete_all():
+    if not session.get("admin"):
+        return "Unauthorized"
+    delete_all_accounts()
+    return redirect("/admin")
