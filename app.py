@@ -26,7 +26,7 @@ LEASE_TIMEOUT = 300
 
 
 # =====================================================
-# DATABASE INIT (SAFE FOR RENDER)
+# DATABASE INIT (SAFE)
 # =====================================================
 
 def init_db():
@@ -51,9 +51,11 @@ def init_db():
     conn.close()
 
 
-@app.before_first_request
-def setup_database():
+# Initialize DB safely at startup
+try:
     init_db()
+except Exception as e:
+    print("DB init error:", e)
 
 
 # =====================================================
