@@ -14,7 +14,6 @@ DB_FILE = "/var/data/accounts.db"
 LOCK = threading.Lock()
 
 ADMIN_PASSWORD = "123456"
-REDDIT_SENDER = "noreply@redditmail.com"
 LEASE_TIMEOUT = 300
 
 
@@ -102,7 +101,6 @@ def get_account():
 
 
 def mark_used(account_id):
-    init_db()
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("""
@@ -115,7 +113,6 @@ def mark_used(account_id):
 
 
 def mark_available(account_id):
-    init_db()
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("""
@@ -201,16 +198,24 @@ def route_get_account():
 @app.route("/check_otp", methods=["POST"])
 def route_check_otp():
     data = request.json
+
     token = get_token(data["refresh_token"], data["client_id"])
     if not token:
-        return jsonify({"otp": None})
+        return jsonify({"status": "fail", "otp": None})
 
     otp = get_otp(data["email"], token)
 
     if otp:
         mark_used(data["id"])
+        return jsonify({
+            "status": "ok",
+            "otp": otp,
+            "email": data["email"],
+            "password": data["password"],
+            "id": data["id"]
+        })
 
-    return jsonify({"otp": otp})
+    return jsonify({"status": "fail", "otp": None})
 
 
 @app.route("/skip", methods=["POST"])
@@ -304,7 +309,6 @@ def route_delete_used():
     c.execute("DELETE FROM accounts WHERE status='USED'")
     conn.commit()
     conn.close()
-
     return redirect("/admin")
 
 
@@ -318,7 +322,6 @@ def route_delete_all():
     c.execute("DELETE FROM accounts")
     conn.commit()
     conn.close()
-
     return redirect("/admin")
 
 
