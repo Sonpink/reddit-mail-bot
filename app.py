@@ -15,8 +15,7 @@ app.secret_key = "secretkey123"
 # DATABASE CONFIG
 # =====================================================
 
-PERSISTENT_DIR = "/opt/render/project/src"
-DB_FILE = os.path.join(PERSISTENT_DIR, "accounts.db")
+DB_FILE = "/var/data/accounts.db"
 
 LOCK = threading.Lock()
 
