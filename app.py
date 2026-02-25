@@ -18,8 +18,6 @@ app.secret_key = "secretkey123"
 PERSISTENT_DIR = "/opt/render/project/src"
 DB_FILE = os.path.join(PERSISTENT_DIR, "accounts.db")
 
-os.makedirs(PERSISTENT_DIR, exist_ok=True)
-
 LOCK = threading.Lock()
 
 ADMIN_PASSWORD = "123456"
@@ -28,11 +26,13 @@ LEASE_TIMEOUT = 300
 
 
 # =====================================================
-# DATABASE INIT (ORIGINAL STRUCTURE)
+# DATABASE INIT (SAFE FOR RENDER)
 # =====================================================
 
 def init_db():
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    os.makedirs(PERSISTENT_DIR, exist_ok=True)
+
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
 
     c.execute("""
@@ -51,7 +51,9 @@ def init_db():
     conn.close()
 
 
-init_db()
+@app.before_first_request
+def setup_database():
+    init_db()
 
 
 # =====================================================
@@ -61,7 +63,7 @@ init_db()
 def reset_expired_accounts():
     now = int(time.time())
 
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
 
     c.execute("""
@@ -88,7 +90,7 @@ def get_account():
 
         now = int(time.time())
 
-        conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+        conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
 
         c.execute("""
@@ -126,7 +128,7 @@ def get_account():
 
 
 def mark_used(account_id):
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
 
     c.execute("""
@@ -141,7 +143,7 @@ def mark_used(account_id):
 
 
 def mark_available(account_id):
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
 
     c.execute("""
@@ -266,7 +268,7 @@ def route_skip():
 
 def get_stats():
 
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
 
     c.execute("SELECT COUNT(*) FROM accounts WHERE status='AVAILABLE'")
@@ -311,7 +313,7 @@ def route_add_accounts():
 
     text = request.form.get("accounts", "")
 
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
 
     lines = text.strip().split("\n")
@@ -358,7 +360,7 @@ def route_delete_used():
     if not session.get("admin"):
         return "Unauthorized"
 
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("DELETE FROM accounts WHERE status='USED'")
     conn.commit()
@@ -373,7 +375,7 @@ def route_delete_all():
     if not session.get("admin"):
         return "Unauthorized"
 
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("DELETE FROM accounts")
     conn.commit()
@@ -392,7 +394,7 @@ def export_available():
     if not session.get("admin"):
         return "Unauthorized"
 
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
 
     c.execute("""
